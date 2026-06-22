@@ -26,6 +26,7 @@ export default function App() {
   const [showApiInput, setShowApiInput] = useState(false);
   const [documents, setDocuments] = useState([]);
   const [selectedDocId, setSelectedDocId] = useState(null);
+  const [viewMode, setViewMode] = useState('cad'); /* 'cad' or 'pdf' */
   
   /* Custom toast notifications (No native alert() used) */
   const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
@@ -81,6 +82,7 @@ export default function App() {
       type: 'application/pdf',
       dataUrl: '',
       base64: '',
+      blobUrl: '', /* Simulated document */
       isDemo: true
     };
     setDocuments(prev => {
@@ -91,6 +93,7 @@ export default function App() {
       return [...prev, demoDoc];
     });
     setSelectedDocId('demo-blueprint');
+    setViewMode('cad');
     showToastMessage("Demo CAD vector layout loaded in the viewport!", "success");
   };
 
@@ -104,16 +107,27 @@ export default function App() {
         const dataUrl = event.target.result;
         const base64 = dataUrl.split(',')[1];
         
+        /* Create a highly compatible local Blob URL for iframe and object tags to bypass Base64 blocks */
+        const blobUrl = URL.createObjectURL(file);
+        
         const newDoc = {
           id: Math.random().toString(36).substring(7),
           name: file.name,
           type: file.type,
           dataUrl: dataUrl,
-          base64: base64
+          base64: base64,
+          blobUrl: blobUrl
         };
         
         setDocuments(prev => [...prev, newDoc]);
         if (!selectedDocId) setSelectedDocId(newDoc.id);
+        
+        /* Auto toggle to standard PDF view if a real PDF is uploaded */
+        if (file.type === 'application/pdf') {
+          setViewMode('pdf');
+        } else {
+          setViewMode('cad');
+        }
         showToastMessage(`Successfully uploaded "${file.name}"`, "success");
       };
       reader.readAsDataURL(file);
@@ -124,6 +138,12 @@ export default function App() {
 
   const removeDocument = (e, id) => {
     e.stopPropagation();
+    const docToRemove = documents.find(d => d.id === id);
+    if (docToRemove && docToRemove.blobUrl) {
+      /* Free memory from revoked local Blob URLs */
+      URL.revokeObjectURL(docToRemove.blobUrl);
+    }
+    
     const filtered = documents.filter(doc => doc.id !== id);
     setDocuments(filtered);
     if (selectedDocId === id) {
@@ -412,7 +432,15 @@ export default function App() {
             documents.map((doc) => (
               <div 
                 key={doc.id} 
-                onClick={() => setSelectedDocId(doc.id)}
+                onClick={() => {
+                  setSelectedDocId(doc.id);
+                  /* Auto toggle visual modes depending on format type */
+                  if (doc.type === 'application/pdf' && !doc.isDemo) {
+                    setViewMode('pdf');
+                  } else {
+                    setViewMode('cad');
+                  }
+                }}
                 className={`p-3 rounded-xl cursor-pointer transition-all flex items-center justify-between group border ${
                   selectedDocId === doc.id 
                     ? 'bg-blue-50/80 border-blue-300 shadow-sm' 
@@ -448,167 +476,208 @@ export default function App() {
             <>
               {/* Toolbar */}
               <div className="w-full h-14 bg-white/50 border-b border-white/50 flex items-center px-4 justify-between backdrop-blur-md z-10">
-                <span className="font-bold text-gray-700 truncate pr-4 text-sm">{selectedDoc.name}</span>
-                
-                {/* CAD Layers Controller */}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <button 
-                    onClick={() => setShowGrid(!showGrid)} 
-                    className={`text-[10px] font-bold px-2.5 py-1 rounded-full transition-all border ${showGrid ? 'bg-blue-500/10 border-blue-500/30 text-blue-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`}
-                  >
-                    Grid Line
-                  </button>
-                  <button 
-                    onClick={() => setShowLoadVectors(!showLoadVectors)} 
-                    className={`text-[10px] font-bold px-2.5 py-1 rounded-full transition-all border ${showLoadVectors ? 'bg-pink-500/10 border-pink-500/30 text-pink-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`}
-                  >
-                    Load Vectors
-                  </button>
-                  <button 
-                    onClick={() => setShowStressHeatmap(!showStressHeatmap)} 
-                    className={`text-[10px] font-bold px-2.5 py-1 rounded-full transition-all border ${showStressHeatmap ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`}
-                  >
-                    Stress Heatmap
-                  </button>
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="font-bold text-gray-700 truncate text-sm">{selectedDoc.name}</span>
+                  
+                  {/* Document View Toggler */}
+                  {selectedDoc.type === 'application/pdf' && !selectedDoc.isDemo && (
+                    <div className="flex bg-slate-200/60 p-0.5 rounded-lg border border-slate-300/30">
+                      <button 
+                        onClick={() => setViewMode('cad')} 
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-all ${viewMode === 'cad' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        📐 CAD Layers
+                      </button>
+                      <button 
+                        onClick={() => setViewMode('pdf')} 
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-all ${viewMode === 'pdf' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        📄 Original PDF
+                      </button>
+                    </div>
+                  )}
                 </div>
+                
+                {/* CAD Layers Controller - Visible only in CAD view mode */}
+                {viewMode === 'cad' && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button 
+                      onClick={() => setShowGrid(!showGrid)} 
+                      className={`text-[10px] font-bold px-2.5 py-1 rounded-full transition-all border ${showGrid ? 'bg-blue-500/10 border-blue-500/30 text-blue-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`}
+                    >
+                      Grid Line
+                    </button>
+                    <button 
+                      onClick={() => setShowLoadVectors(!showLoadVectors)} 
+                      className={`text-[10px] font-bold px-2.5 py-1 rounded-full transition-all border ${showLoadVectors ? 'bg-pink-500/10 border-pink-500/30 text-pink-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`}
+                    >
+                      Load Vectors
+                    </button>
+                    <button 
+                      onClick={() => setShowStressHeatmap(!showStressHeatmap)} 
+                      className={`text-[10px] font-bold px-2.5 py-1 rounded-full transition-all border ${showStressHeatmap ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`}
+                    >
+                      Stress Heatmap
+                    </button>
+                  </div>
+                )}
               </div>
 
-              {/* Vector Rendering Board */}
-              <div 
-                ref={viewportRef}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseUp}
-                className="flex-1 bg-slate-950 overflow-hidden relative cursor-grab active:cursor-grabbing flex items-center justify-center"
-              >
-                {/* CAD Blueprint Blueprint Layer */}
-                <div 
-                  className="absolute origin-center transition-transform duration-75"
-                  style={{
-                    transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                    width: '600px',
-                    height: '500px'
-                  }}
-                >
-                  {/* Grid Lines Overlay */}
-                  {showGrid && (
-                    <div className="absolute inset-0 pointer-events-none" style={{
-                      backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.07) 1px, transparent 1px)',
-                      backgroundSize: '20px 20px'
-                    }} />
-                  )}
+              {/* Viewport Render Area */}
+              <div className="flex-1 overflow-hidden relative bg-slate-950 flex items-center justify-center">
+                {viewMode === 'pdf' && selectedDoc.blobUrl ? (
+                  /* HIGH FIDELITY SECURE PDF RENDERER (Local Blob URLs bypass iframe security restrictions) */
+                  <div className="w-full h-full p-2 bg-slate-900 flex flex-col">
+                    <object 
+                      data={selectedDoc.blobUrl} 
+                      type="application/pdf" 
+                      className="w-full h-full rounded-2xl border border-white/10 shadow-lg"
+                    >
+                      <iframe 
+                        src={selectedDoc.blobUrl} 
+                        className="w-full h-full rounded-2xl border border-white/10" 
+                        title="Native PDF Fallback Viewer"
+                      />
+                    </object>
+                  </div>
+                ) : (
+                  /* CAD BLUEPRINT GRAPHICS LAYER */
+                  <div 
+                    ref={viewportRef}
+                    onMouseDown={handleMouseDown}
+                    onMouseMove={handleMouseMove}
+                    onMouseUp={handleMouseUp}
+                    onMouseLeave={handleMouseUp}
+                    className="w-full h-full overflow-hidden relative cursor-grab active:cursor-grabbing flex items-center justify-center"
+                  >
+                    <div 
+                      className="absolute origin-center transition-transform duration-75"
+                      style={{
+                        transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                        width: '600px',
+                        height: '500px'
+                      }}
+                    >
+                      {/* Grid Lines Overlay */}
+                      {showGrid && (
+                        <div className="absolute inset-0 pointer-events-none" style={{
+                          backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.07) 1px, transparent 1px)',
+                          backgroundSize: '20px 20px'
+                        }} />
+                      )}
 
-                  {/* Stress Heatmap layer */}
-                  {showStressHeatmap && (
-                    <div className="absolute inset-0 pointer-events-none mix-blend-screen bg-gradient-to-br from-indigo-500/20 via-pink-500/30 to-rose-600/40 animate-pulse duration-1000" />
-                  )}
+                      {/* Stress Heatmap layer */}
+                      {showStressHeatmap && (
+                        <div className="absolute inset-0 pointer-events-none mix-blend-screen bg-gradient-to-br from-indigo-500/20 via-pink-500/30 to-rose-600/40 animate-pulse duration-1000" />
+                      )}
 
-                  {/* SVG CAD Blueprint Elements */}
-                  <svg className="w-full h-full" viewBox="0 0 600 500">
-                    <rect width="600" height="500" fill="transparent" />
+                      {/* SVG CAD Blueprint Elements */}
+                      <svg className="w-full h-full" viewBox="0 0 600 500">
+                        <rect width="600" height="500" fill="transparent" />
 
-                    {/* Standard Blueprint Borders */}
-                    <rect x="20" y="20" width="560" height="460" stroke="rgba(59, 130, 246, 0.4)" strokeWidth="2" fill="none" />
-                    <rect x="25" y="25" width="550" height="450" stroke="rgba(59, 130, 246, 0.2)" strokeWidth="1" fill="none" />
+                        {/* Standard Blueprint Borders */}
+                        <rect x="20" y="20" width="560" height="460" stroke="rgba(59, 130, 246, 0.4)" strokeWidth="2" fill="none" />
+                        <rect x="25" y="25" width="550" height="450" stroke="rgba(59, 130, 246, 0.2)" strokeWidth="1" fill="none" />
 
-                    {/* Check if Custom Uploaded Image is present */}
-                    {!selectedDoc.isDemo && selectedDoc.type !== 'application/pdf' ? (
-                      <image href={selectedDoc.dataUrl} x="50" y="50" width="500" height="400" preserveAspectRatio="xMidYMid meet" />
-                    ) : (
-                      /* Render Interactive Mock Vector Layout (Ideal for raw PDFs or Demo Document) */
-                      <>
-                        {/* Slab Boundary */}
-                        <rect x="150" y="120" width="300" height="260" stroke="rgba(59, 130, 246, 0.6)" strokeWidth="3" fill="rgba(59,130,246,0.05)" strokeDasharray="5,5" />
+                        {/* Check if Custom Uploaded Image is present */}
+                        {!selectedDoc.isDemo && selectedDoc.type !== 'application/pdf' ? (
+                          <image href={selectedDoc.dataUrl} x="50" y="50" width="500" height="400" preserveAspectRatio="xMidYMid meet" />
+                        ) : (
+                          /* Render Interactive Mock Vector Layout (Ideal for raw PDFs or Demo Document) */
+                          <>
+                            {/* Slab Boundary */}
+                            <rect x="150" y="120" width="300" height="260" stroke="rgba(59, 130, 246, 0.6)" strokeWidth="3" fill="rgba(59,130,246,0.05)" strokeDasharray="5,5" />
 
-                        {/* Beams */}
-                        {DEMO_STRUCTURE.beams.map((beam, i) => (
-                          <g key={`beam-${i}`}>
-                            <line 
-                              x1={beam.fromX} 
-                              y1={beam.fromY} 
-                              x2={beam.toX} 
-                              y2={beam.toY} 
-                              stroke="rgba(244, 63, 94, 0.8)" 
-                              strokeWidth="4" 
-                            />
-                            <text 
-                              x={(beam.fromX + beam.toX) / 2} 
-                              y={((beam.fromY + beam.toY) / 2) - 8} 
-                              fill="rgba(244, 63, 94, 0.9)" 
-                              fontSize="10" 
-                              fontWeight="bold" 
-                              textAnchor="middle"
-                            >
-                              {beam.label}
-                            </text>
-                          </g>
-                        ))}
+                            {/* Beams */}
+                            {DEMO_STRUCTURE.beams.map((beam, i) => (
+                              <g key={`beam-${i}`}>
+                                <line 
+                                  x1={beam.fromX} 
+                                  y1={beam.fromY} 
+                                  x2={beam.toX} 
+                                  y2={beam.toY} 
+                                  stroke="rgba(244, 63, 94, 0.8)" 
+                                  strokeWidth="4" 
+                                />
+                                <text 
+                                  x={(beam.fromX + beam.toX) / 2} 
+                                  y={((beam.fromY + beam.toY) / 2) - 8} 
+                                  fill="rgba(244, 63, 94, 0.9)" 
+                                  fontSize="10" 
+                                  fontWeight="bold" 
+                                  textAnchor="middle"
+                                >
+                                  {beam.label}
+                                </text>
+                              </g>
+                            ))}
 
-                        {/* Columns */}
-                        {DEMO_STRUCTURE.columns.map((col, i) => (
-                          <g key={`col-${i}`}>
-                            <rect 
-                              x={col.x - 15} 
-                              y={col.y - 15} 
-                              width="30" 
-                              height="30" 
-                              fill="rgba(59, 130, 246, 0.8)" 
-                              stroke="white" 
-                              strokeWidth="1.5" 
-                            />
-                            <text 
-                              x={col.x} 
-                              y={col.y - 22} 
-                              fill="#60a5fa" 
-                              fontSize="10" 
-                              fontWeight="bold" 
-                              textAnchor="middle"
-                            >
-                              {col.label}
-                            </text>
-                            
-                            {/* Load Vectors Visual Indicators */}
-                            {showLoadVectors && (
-                              <path 
-                                d={`M ${col.x} ${col.y + 15} L ${col.x} ${col.y + 35} M ${col.x - 4} ${col.y + 30} L ${col.x} ${col.y + 35} L ${col.x + 4} ${col.y + 30}`} 
-                                stroke="#f43f5e" 
-                                strokeWidth="2" 
-                                fill="none"
-                              />
-                            )}
-                          </g>
-                        ))}
+                            {/* Columns */}
+                            {DEMO_STRUCTURE.columns.map((col, i) => (
+                              <g key={`col-${i}`}>
+                                <rect 
+                                  x={col.x - 15} 
+                                  y={col.y - 15} 
+                                  width="30" 
+                                  height="30" 
+                                  fill="rgba(59, 130, 246, 0.8)" 
+                                  stroke="white" 
+                                  strokeWidth="1.5" 
+                                />
+                                <text 
+                                  x={col.x} 
+                                  y={col.y - 22} 
+                                  fill="#60a5fa" 
+                                  fontSize="10" 
+                                  fontWeight="bold" 
+                                  textAnchor="middle"
+                                >
+                                  {col.label}
+                                </text>
+                                
+                                {/* Load Vectors Visual Indicators */}
+                                {showLoadVectors && (
+                                  <path 
+                                    d={`M ${col.x} ${col.y + 15} L ${col.x} ${col.y + 35} M ${col.x - 4} ${col.y + 30} L ${col.x} ${col.y + 35} L ${col.x + 4} ${col.y + 30}`} 
+                                    stroke="#f43f5e" 
+                                    strokeWidth="2" 
+                                    fill="none"
+                                  />
+                                )}
+                              </g>
+                            ))}
 
-                        {/* Dimensions & Spans */}
-                        {DEMO_STRUCTURE.dimensions.map((dim, i) => (
-                          <g key={`dim-${i}`}>
-                            <line x1={dim.fromX} y1={dim.fromY} x2={dim.toX} y2={dim.toY} stroke="rgba(255,255,255,0.4)" strokeWidth="1" strokeDasharray="2,2" />
-                            <text x={(dim.fromX + dim.toX) / 2} y={(dim.fromY + dim.toY) / 2 - 5} fill="rgba(255,255,255,0.6)" fontSize="9" textAnchor="middle">
-                              {dim.label}
-                            </text>
-                          </g>
-                        ))}
+                            {/* Dimensions & Spans */}
+                            {DEMO_STRUCTURE.dimensions.map((dim, i) => (
+                              <g key={`dim-${i}`}>
+                                <line x1={dim.fromX} y1={dim.fromY} x2={dim.toX} y2={dim.toY} stroke="rgba(255,255,255,0.4)" strokeWidth="1" strokeDasharray="2,2" />
+                                <text x={(dim.fromX + dim.toX) / 2} y={(dim.fromY + dim.toY) / 2 - 5} fill="rgba(255,255,255,0.6)" fontSize="9" textAnchor="middle">
+                                  {dim.label}
+                                </text>
+                              </g>
+                            ))}
 
-                        {/* Center Point Indicator */}
-                        <circle cx="300" cy="250" r="4" fill="#a855f7" />
-                        <text x="310" y="254" fill="#d8b4fe" fontSize="8" fontWeight="bold">CENTER PIER</text>
-                      </>
-                    )}
+                            {/* Center Point Indicator */}
+                            <circle cx="300" cy="250" r="4" fill="#a855f7" />
+                            <text x="310" y="254" fill="#d8b4fe" fontSize="8" fontWeight="bold">CENTER PIER</text>
+                          </>
+                        )}
 
-                    {/* General Drawing Sheet Info */}
-                    <text x="40" y="440" fill="rgba(255,255,255,0.4)" fontSize="10">EZ CAD ENGINE v1.2</text>
-                    <text x="40" y="455" fill="rgba(255,255,255,0.25)" fontSize="9">Coord: X: {pan.x} | Y: {pan.y}</text>
-                    <text x="560" y="450" fill="#60a5fa" fontSize="12" fontWeight="bold" textAnchor="end">SHEET S102</text>
-                  </svg>
-                </div>
+                        {/* General Drawing Sheet Info */}
+                        <text x="40" y="440" fill="rgba(255,255,255,0.4)" fontSize="10">EZ CAD ENGINE v1.2</text>
+                        <text x="40" y="455" fill="rgba(255,255,255,0.25)" fontSize="9">Coord: X: {pan.x} | Y: {pan.y}</text>
+                        <text x="560" y="450" fill="#60a5fa" fontSize="12" fontWeight="bold" textAnchor="end">SHEET S102</text>
+                      </svg>
+                    </div>
 
-                {/* Onboard Floating Viewport Controllers */}
-                <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md border border-white/10 rounded-xl p-2 flex gap-2 z-10">
-                  <button onClick={() => handleZoom(1.2)} className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center text-sm" title="Zoom In">+</button>
-                  <button onClick={() => handleZoom(0.8)} className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center text-sm" title="Zoom Out">-</button>
-                  <button onClick={resetView} className="px-3 h-8 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center text-xs" title="Reset Camera">Reset</button>
-                </div>
+                    {/* Onboard Floating Viewport Controllers */}
+                    <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md border border-white/10 rounded-xl p-2 flex gap-2 z-10">
+                      <button onClick={() => handleZoom(1.2)} className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center text-sm" title="Zoom In">+</button>
+                      <button onClick={() => handleZoom(0.8)} className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center text-sm" title="Zoom Out">-</button>
+                      <button onClick={resetView} className="px-3 h-8 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center text-xs" title="Reset Camera">Reset</button>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           ) : (
